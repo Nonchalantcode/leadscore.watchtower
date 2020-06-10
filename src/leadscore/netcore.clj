@@ -166,26 +166,30 @@
                            (assoc-default-info url {:number nil, :latency 0}))))
             resolved-connections stuck-connections)))
 
-(defn- get-email-addr [^String url]
-  (let [connection (open-connection url)
-        status (.getResponseCode connection)
-        page-source (cond
-                      (= status 200) (read-from-connection connection)
+(defn get-email-addr [^String url]
+  (try
+    (let [connection (doto (open-connection url) (.setConnectTimeout 10000) (.setReadTimeout 10000))
+          status (.getResponseCode connection)
+          page-source (cond
+                        (= status 200) (read-from-connection connection)
 
-                      (and (>= status 300) (<= status 308)) (-> (follow-redirect connection)
-                                                                (read-from-connection))
+                        (and (>= status 300) (<= status 308)) (-> (follow-redirect connection)
+                                                                  (read-from-connection))
 
-                      (>= status 400) nil)]
-    (try
+                        (>= status 400) nil)]
+
       (if (nil? page-source)
         nil
-        (try-match page-source
+        #_(try-match page-source
                    ;; trivial case: email addresses inside <a> elements 
                    #"(?<=mailto:)[^\"]+"
+                   #"[a-zA-Z0-9]+@[a-zA-Z0-9]+\.\w{2,4}"
                    ;; email addresses preceded by opening html tags, colons, or a space character
-                   #"(?<=(>|\s|:))[\w\-]+@[\w\-]+\.\w{2,4}"))
-      (catch Exception ex
-        (println "Host [" url "]" "has thrown an exception:\n\t" (.getMessage ex))))))
+                   #"(?<=(>|\s|:))[\w\-]+@[\w\-]+\.\w{2,4}")
+        (try-match page-source
+                   #"[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\.\w{2,4}")))
+    (catch Exception ex
+      (println "Host [" url "]" "has thrown an exception:\n\t" (.getMessage ex)))))
 
 (defmacro ends-with [str-value & suffixes]
   `(or ~@(map (fn [v] `(. ~str-value ~'endsWith ~v)) suffixes)))

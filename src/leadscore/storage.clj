@@ -10,9 +10,9 @@
            java.util.function.Consumer)
   (:require [clojure.inspector :refer (inspect-tree)]
             [leadscore.constants :refer (resources-dir buffers-dir separator)]
-            [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop)]
+            [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop async-call)]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch) :rename {await-batch crawl-batch}]
-            [leadscore.netcore :refer (get-numbers)]
+            [leadscore.netcore :refer (get-numbers get-email-addr)]
             [clojure.string :refer (join split)]
             [clojure.java.jdbc :as jdbc]
             [cheshire.core :refer :all]))
@@ -337,29 +337,6 @@
           (noop)
           (do (.write out-success (str category "," curr-lead "," state "," city "," seo "," ppc "," phone))
               (.newLine out-success)))))))
-
-(defn- consolidate-leads-buffer! [])
-
-
-(defn- batch-query-lead-id
-  "Runs #'get-lead-id in a new thread with the information provided in data-coll.
-   data-coll must be a collection in which every one of its elements is itself a collection with values matching the
-   parameters that #'get-lead-id expects"
-  [db-spec data-coll]
-  (let [p (promise)
-        all-leads (atom {})
-        counter (atom 0)]
-    (add-watch counter :counter (fn [key reference old-v new-v]
-                                  (if (= new-v (count data-coll))
-                                    (deliver p @all-leads)
-                                    nil)))
-    (doall (map (fn [url]
-                  (future (try
-                            (swap! all-leads assoc url (jdbc/query db-spec ["SELECT lead_id FROM leads WHERE lead_url = ?" url]))
-                            (catch Exception e (println (.getMessage e))))
-                          (swap! counter inc)))
-                data-coll))
-    (deref p)))
 
 (defmulti dump-on-db
   "Dumps the contents of the provided source onto the database specified by db-spec.
