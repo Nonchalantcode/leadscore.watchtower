@@ -7,9 +7,7 @@
             LinkedList])
   (:require (clojure [string :refer (replace-first starts-with?)])
             (leadscore [constants :as constants :refer (phone-matcher asummed-user-agent)]
-                       [report])
-            [net.cgrand.enlive-html :as html]
-            [leadscore.functions :refer (get-hostname)]))
+                       [report])))
 
 (set! *warn-on-reflection* true)
 
@@ -103,25 +101,27 @@
 (defn get-phone-match [^String source-str]
   (re-seq phone-matcher source-str))
 
-(defn get-phone-number [host & {:keys [on-exception]}]
+(defn get-phone-number [host]
   (try
     (let [connection (open-connection host)
+          status-code (.getResponseCode connection)
           follow-redirect (fn [^HttpURLConnection con]
                             (-> con
                                 (follow-redirect)
                                 (read-from-connection :callback get-phone-match)
                                 (first-two-results)))]
+      (cond
+        (= 200 status-code)
+        (-> connection (read-from-connection :callback get-phone-match) (first-two-results))
 
-      (condp = (.getResponseCode connection)
-        200 (-> connection
-                (read-from-connection :callback get-phone-match)
-                (first-two-results))
-        301 (follow-redirect connection)
-        302 (follow-redirect connection)
-        307 (follow-redirect connection)
-        308 (follow-redirect connection)
-        403 (throw (java.io.IOException. "Unable to read from this connection. 403"))
-        503 "503"))
+        (or (= 301 status-code) (= 302 status-code) (= 307 status-code) (= 308 status-code))
+        (follow-redirect connection)
+
+        (= 403 status-code)
+        (throw (java.io.IOException. "Unable to read from this connection. 403"))
+
+        (= 503 status-code)
+        (throw (java.io.IOException. "Server responded with a 503 status code."))))
     (catch IOException ex
       (println "Host" [host] "failed with reason: " (.getMessage ex)))
     (catch Exception ex
@@ -132,9 +132,6 @@
     (-> (assoc {} url {:number (get-phone-number url)
                        :latency (- (.getTime (Date.)) t1)}))))
 
-(defn- merge-numbers [numbers]
-  (apply merge {} numbers))
-
 (defn- assoc-default-info [^String url default-info]
   (assoc {} url default-info))
 
@@ -143,8 +140,7 @@
   (doall (map (fn [url] [url (future (map-phone-info url))]) url-collecttion)))
 
 (defn process-crawl-chunk
-  [crawl-coll timeout & {:keys [default-value]
-                         :or {default-value {:number nil}}}]
+  [crawl-coll timeout]
   (let [partial-results (defer-crawl crawl-coll) sink (LinkedList.)]
     [(reduce (fn [acc [url results-map]]
                (merge acc (deref results-map timeout
