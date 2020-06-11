@@ -12,7 +12,7 @@
             [leadscore.constants :refer (resources-dir buffers-dir separator)]
             [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop async-call)]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch) :rename {await-batch crawl-batch}]
-            [leadscore.netcore :refer (get-numbers get-email-addr)]
+            [leadscore.netcore :refer (get-numbers get-emails)]
             [clojure.string :refer (join split)]
             [clojure.java.jdbc :as jdbc]
             [cheshire.core :refer :all]))

@@ -9,6 +9,9 @@
             (leadscore [constants :as constants :refer (phone-matcher asummed-user-agent)]
                        [report])))
 
+(def ^:private ^:const default-phone-info {:number nil, :latency 0})
+(def ^:private ^:const default-email-info {:email nil, :latency 0})
+
 (set! *warn-on-reflection* true)
 
 (defmacro try-match [str-source & regexes]
@@ -71,6 +74,9 @@
       (take 1 first-two)
       (identity first-two))))
 
+(defmacro ends-with [str-value & suffixes]
+  `(or ~@(map (fn [v] `(. ~str-value ~'endsWith ~v)) suffixes)))
+
 (defn- set-req-property [^HttpURLConnection connection prop val]
   (doto connection (.setRequestProperty prop val)))
 
@@ -127,45 +133,6 @@
     (catch Exception ex
       (println (.getMessage ex)))))
 
-(defn- map-phone-info [^String url]
-  (let [t1 (.getTime (Date.))]
-    (-> (assoc {} url {:number (get-phone-number url)
-                       :latency (- (.getTime (Date.)) t1)}))))
-
-(defn- assoc-default-info [^String url default-info]
-  (assoc {} url default-info))
-
-(defn defer-crawl
-  [url-collecttion]
-  (doall (map (fn [url] [url (future (map-phone-info url))]) url-collecttion)))
-
-(defn process-crawl-chunk
-  [crawl-coll timeout]
-  (let [partial-results (defer-crawl crawl-coll) sink (LinkedList.)]
-    [(reduce (fn [acc [url results-map]]
-               (merge acc (deref results-map timeout
-                                 (do (.add sink [url results-map])
-                                     {}))))
-             (hash-map)
-             partial-results) sink]))
-
-(defn get-numbers
-  [url-collection & {:keys [concurrent-requests timeout]
-                     :or {concurrent-requests 6, timeout 2000}}]
-  (let [chunks (partition concurrent-requests concurrent-requests nil url-collection)
-        stuck-connections (LinkedList.)
-        resolved-connections (reduce (fn [acc curr-chunk]
-                                       (let [[processed-chunk unprocessed] (process-crawl-chunk curr-chunk timeout)]
-                                         (.addAll stuck-connections unprocessed)
-                                         (merge acc processed-chunk)))
-                                     (hash-map)
-                                     chunks)]
-    (reduce (fn [acc [url f]]
-              (merge acc (if (realized? f)
-                           @f
-                           (assoc-default-info url {:number nil, :latency 0}))))
-            resolved-connections stuck-connections)))
-
 (defn get-email-addr [^String url]
   (try
     (let [connection (doto (open-connection url) (.setConnectTimeout 10000) (.setReadTimeout 10000))
@@ -182,14 +149,61 @@
         nil
         #_(try-match page-source
                    ;; trivial case: email addresses inside <a> elements 
-                   #"(?<=mailto:)[^\"]+"
-                   #"[a-zA-Z0-9]+@[a-zA-Z0-9]+\.\w{2,4}"
+                     #"(?<=mailto:)[^\"]+"
+                     #"[a-zA-Z0-9]+@[a-zA-Z0-9]+\.\w{2,4}"
                    ;; email addresses preceded by opening html tags, colons, or a space character
-                   #"(?<=(>|\s|:))[\w\-]+@[\w\-]+\.\w{2,4}")
+                     #"(?<=(>|\s|:))[\w\-]+@[\w\-]+\.\w{2,4}")
         (try-match page-source
                    #"[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\.\w{2,4}")))
     (catch Exception ex
       (println "Host [" url "]" "has thrown an exception:\n\t" (.getMessage ex)))))
 
-(defmacro ends-with [str-value & suffixes]
-  `(or ~@(map (fn [v] `(. ~str-value ~'endsWith ~v)) suffixes)))
+(defn- map-info [^String url key callback]
+  (let [t1 (.getTime (Date.))]
+    (-> (assoc (hash-map) url {key (callback url) :latency (- (.getTime (Date.)) t1)}))))
+
+(defn- map-phone-info [^String url]
+  (map-info url :number get-phone-number))
+
+(defn- map-email-info [^String url]
+  (map-info url :email get-email-addr))
+
+(defn- assoc-default-info [^String url default-info]
+  (assoc {} url default-info))
+
+(defn defer-crawl
+  [url-collecttion callback]
+  (doall (map (fn [url] [url (future (callback url))]) url-collecttion)))
+
+(defn proces-crawl-chunk
+  [crawl-coll timeout callback]
+  (let [partial-results (defer-crawl crawl-coll callback) sink (LinkedList.)]
+    [(reduce (fn [acc [url results-map]]
+               (merge acc (deref results-map timeout
+                                 (do (.add sink [url results-map])
+                                     {}))))
+             (hash-map)
+             partial-results) sink]))
+
+(defn crawl
+  [url-collection crawl-callback & {:keys [concurrent-requests timeout default-info]
+                                    :or {concurrent-requests 6, timeout 2000}}]
+  (let [chunks (partition concurrent-requests concurrent-requests nil url-collection)
+        stuck-connections (LinkedList.)
+        resolved-connections (reduce (fn [acc curr-chunk]
+                                       (let [[processed-chunk unprocessed] (proces-crawl-chunk curr-chunk timeout crawl-callback)]
+                                         (.addAll stuck-connections unprocessed)
+                                         (merge acc processed-chunk)))
+                                     (hash-map)
+                                     chunks)]
+    (reduce (fn [acc [url f]]
+              (merge acc (if (realized? f)
+                           @f
+                           (assoc-default-info url default-info))))
+            resolved-connections stuck-connections)))
+
+(defn get-numbers [url-collection]
+  (crawl url-collection map-phone-info :default-info default-phone-info))
+
+(defn get-emails [url-collection]
+    (crawl url-collection map-email-info :timeout 2500 :default-info default-email-info))
