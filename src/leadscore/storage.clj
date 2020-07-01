@@ -8,9 +8,8 @@
                       LinkedList
                       HashMap)
            java.util.function.Consumer)
-  (:require [clojure.inspector :refer (inspect-tree)]
-            [leadscore.constants :refer (resources-dir buffers-dir separator)]
-            [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop async-call)]
+  (:require [leadscore.constants :refer (resources-dir buffers-dir separator)]
+            [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop async-call inspect-buffer get-in!)]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch) :rename {await-batch crawl-batch}]
             [leadscore.netcore :refer (get-numbers get-emails)]
             [clojure.string :refer (join split)]
@@ -25,17 +24,11 @@
 ;; client-side crawler program. The leads-buffer needs to be filtered against leads that already exist in the database
 ;; for each particular State, and then for each particular city to ensure non-duplicated leads are being crawled.
 
-(def ^:private leads-buffer (HashMap.))
+(def leads-buffer (HashMap.))
 (def ^:private db-leads-buffer (HashMap.))
 (def ^:private veto-list ^HashSet (load-veto-lists (str resources-dir separator "vetolist")))
 (def ^:private db-spec (:db-spec conf))
 (def ^:private crawl-buffer (HashMap.))
-
-(defn- inspect-buffer [buffer] (inspect-tree buffer))
-(defn- view-keys [] (.keySet leads-buffer))
-
-(defn- get-in! [^java.util.HashMap m & ks]
-  (reduce (fn [acc curr] (.get acc curr)) m ks))
 
 (defn- in-vetolist? [^HashSet veto-list ^String url]
   (.contains veto-list (get-hostname url)))
@@ -176,14 +169,14 @@
 
 (defn export-buffer
   "Writes to the /resources/buffers directory a .CSV file with the contents of the #'leads-buffer var"
-  [category & {:keys [tzone] :or {tzone "nospec"}}]
+  [category & {:keys [timezone] :or {timezone "nospec"}}]
   (let [mappings ^java.util.HashMap (.remove leads-buffer category)
         all-states (map #(identity [% (.get mappings %)]) (.keySet mappings))
         results-folder (doto (java.io.File. (str buffers-dir
                                                  separator
                                                  category
                                                  "-"
-                                                 tzone
+                                                 timezone
                                                  "-"
                                                  (System/currentTimeMillis)))
                          (.mkdirs))

@@ -1,7 +1,8 @@
 (ns leadscore.functions
   (:import java.util.function.Consumer
            (java.util HashSet LinkedList)
-           (java.io File FileReader BufferedReader InputStreamReader)))
+           (java.io File FileReader BufferedReader InputStreamReader))
+  (:require [clojure.inspector :refer (inspect-tree)]))
 
 (defn noop [])
 
@@ -99,3 +100,8 @@
     (doseq [arg init]
       (future (swap! results conj (func arg))))
     (deref p)))
+
+(defn inspect-buffer [buffer] (inspect-tree buffer))
+
+(defn get-in! [^java.util.HashMap m & ks]
+  (reduce (fn [acc curr] (.get acc curr)) m ks))
