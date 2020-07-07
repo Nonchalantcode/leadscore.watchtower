@@ -26,7 +26,7 @@
     (response/response "Hello, world!"))
   (POST "/buffer" {:keys [params body]}
     (do (storage/save-to-buffer params body)
-        (response/response ))))
+        (response/response "Stored"))))
 
 (def app (fn [request-map]
            (-> request-map
