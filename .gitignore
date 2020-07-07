@@ -14,10 +14,7 @@ doc/
 CHANGELOG.md
 LICENSE
 .csv
-resources/*.csv
 .vscode/
 test/
 reports/
-resources/buffers/
-resources/vetolist
 resources/.ENV
