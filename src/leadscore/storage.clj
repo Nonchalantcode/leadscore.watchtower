@@ -62,6 +62,12 @@
       (first)
       (:city_id)))
 
+(defn- get-timezone-for [db-spec state-name]
+  (-> (jdbc/query db-spec ["SELECT timezone_name FROM timezone,state WHERE state.timezone_id = timezone.timezone_id AND state.state_name = ?" state-name])
+      (first)
+      (:timezone_name)))
+  
+
 (defn- insert-city [db-spec state-name city-name]
   (let [state-id (get-state-id db-spec state-name)]
     (if (nil? state-id)
@@ -225,17 +231,20 @@
 (defmulti load-crawl-buffer
   "Loads leads from a .CSV file and writes its contents to the #'crawl-buffer var for further processing,
    that is, to gather phone numbers or spy fu information."
-  (fn [source category] (type source)))
+  (fn [source category timezone] (type source)))
 
 (defmethod load-crawl-buffer java.lang.String
-  [source category] (load-crawl-buffer (File. source) category))
+  [source category timezone] (load-crawl-buffer (File. source) category timezone))
 
 (defmethod load-crawl-buffer java.io.File
-  [source category]
+  [source category timezone]
   (with-open [handle (-> source (FileReader.) (BufferedReader.))]
     (.readLine handle) ;; The column names for the table. We discard this value.
-    (.put crawl-buffer "category" category)
-    (.put crawl-buffer "urls" (HashSet.))
+    (doto crawl-buffer
+      (.put "category" category)
+      (.put "timezone" timezone)
+      (.put "urls" (HashSet.)))
+    
     (.forEach (.lines handle) (reify Consumer
                                 (accept [this v]
                                   (let [[_ url state city seo ppc phone] (split v #",")]
@@ -316,8 +325,13 @@
    the process) and saving it to the /out directoy inside the /buffers directory for this
    program"
   []
-  (with-open [out-all (get-crawl-buffer-writer (.get crawl-buffer "category") "all")
-              out-success (get-crawl-buffer-writer (.get crawl-buffer "category") "success")]
+  (with-open [out-all (get-crawl-buffer-writer
+                       (.get crawl-buffer "category")
+                       (str "-all-" (.get crawl-buffer "timezone-")))
+              out-success (get-crawl-buffer-writer
+                           (.get crawl-buffer "category")
+                           (str "-success-" (.get crawl-buffer "timezone")))]
+    
     (write-table-head out-all "Category" "Lead URL" "State" "City" "SEO", "PPC" "Phone #")
     (write-table-head out-success "Category" "Lead URL" "State" "City" "SEO", "PPC" "Phone #")
     (doseq [curr-lead (.get crawl-buffer "urls")]
@@ -355,14 +369,4 @@
                                                  (conj! results [category-id state-id current-lead (.get lead-map "phone")])))
                                              (transient [])
                                              entries)))
-    ;; inserts spy-fu data. 
-    (jdbc/insert-multi! db-spec :spyfu_data [:lead_id :data_seo_value :data_ppc_value]
-                        (persistent! (reduce (fn [results [url category-id state-id]]
-                                               (let [seo (get-in! source url "seo")
-                                                     ppc (get-in! source url "ppc")]
-                                                 (conj! results [(get-lead-id db-spec url category-id state-id)
-                                                                 (if (empty? seo) 0 (Integer/valueOf seo))
-                                                                 (if (empty? ppc) 0 (Integer/valueOf ppc))])))
-                                             (transient [])
-                                             lead-data)))
     :done!))
