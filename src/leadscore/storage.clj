@@ -27,8 +27,8 @@
 (def leads-buffer (HashMap.))
 (def ^:private db-leads-buffer (HashMap.))
 (def ^:private veto-list ^HashSet (load-veto-lists (str resources-dir separator "vetolist")))
-(def ^:private db-spec (:db-spec conf))
-(def ^:private crawl-buffer (HashMap.))
+(def db-spec (:db-spec conf))
+(def crawl-buffer (HashMap.))
 
 (defn- in-vetolist? [^HashSet veto-list ^String url]
   (.contains veto-list (get-hostname url)))
