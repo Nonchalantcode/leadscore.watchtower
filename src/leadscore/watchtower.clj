@@ -12,12 +12,12 @@
              :refer (leads-buffer
                      crawl-buffer
                      db-spec
+                     api-key
                      export-buffer
                      load-crawl-buffer
-                     populate-crawl-buffer!
                      dump-crawl-buffer!)
              :rename {export-buffer export-leads-buffer}]
-            [leadscore.functions :as functions :refer (inspect-buffer)]
+            [leadscore.functions :as functions :refer (inspect-buffer load-veto-lists)]
             [cheshire.core :as JSON]
             (ring.adapter [jetty :refer :all])
             (ring.middleware [resource :refer :all]
@@ -30,6 +30,13 @@
 (set! *warn-on-reflection* true)
 
 (defn view-active-categories [] (keys leads-buffer))
+
+(defn crawl-phone-info [] (storage/populate-crawl-buffer! {:phone? true}))
+
+(defn crawl-spyfu-info [api-key] (storage/populate-crawl-buffer! {:spy-fu? true :api-key api-key}))
+
+(defn reload-veto-list []
+  (load-veto-lists (str resources-dir separator "vetolist")))
 
 (defroutes routes-table
   (GET "/" []

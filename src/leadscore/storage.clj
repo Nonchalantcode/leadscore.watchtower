@@ -28,6 +28,7 @@
 (def ^:private db-leads-buffer (HashMap.))
 (def ^:private veto-list ^HashSet (load-veto-lists (str resources-dir separator "vetolist")))
 (def db-spec (:db-spec conf))
+(def api-key (-> conf :spy-fu :api-key))
 (def crawl-buffer (HashMap.))
 
 (defn- in-vetolist? [^HashSet veto-list ^String url]
