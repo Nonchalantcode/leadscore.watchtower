@@ -5,15 +5,25 @@
                     BufferedWriter
                     BufferedReader)
            (java.util HashSet
-                      LinkedList
                       HashMap)
            java.util.function.Consumer)
-  (:require [leadscore.constants :refer (resources-dir buffers-dir separator)]
-            [leadscore.functions :refer (iterate! for-each get-hostname load-config load-veto-lists noop async-call inspect-buffer get-in!)]
+  (:require [leadscore.constants :refer (resources-dir 
+                                         buffers-dir 
+                                         separator)]
+            [leadscore.functions :refer (iterate!
+                                         for-each
+                                         get-hostname
+                                         load-config
+                                         load-veto-lists
+                                         noop
+                                         inspect-buffer
+                                         if-bound
+                                         get-in!)]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch) :rename {await-batch crawl-batch}]
             [leadscore.netcore :refer (get-numbers get-emails)]
             [clojure.string :refer (join split)]
             [clojure.java.jdbc :as jdbc]
+            [clojure.walk :refer (postwalk)]
             [cheshire.core :refer :all]))
 
 (def ^:private out-dir (str buffers-dir separator "out"))
@@ -63,10 +73,10 @@
       (first)
       (:city_id)))
 
-(defn- get-timezone-for [db-spec state-name]
-  (-> (jdbc/query db-spec ["SELECT timezone_name FROM timezone,state WHERE state.timezone_id = timezone.timezone_id AND state.state_name = ?" state-name])
+(defn- get-timezone-id [db-spec timezone-name]
+  (-> (jdbc/query db-spec ["SELECT timezone_id FROM timezone WHERE timezone_name = ?" timezone-name])
       (first)
-      (:timezone_name)))
+      (:timezone_id)))
   
 
 (defn- insert-city [db-spec state-name city-name]
@@ -346,6 +356,12 @@
           (do (.write out-success (str category "," curr-lead "," state "," city "," seo "," ppc "," phone))
               (.newLine out-success)))))))
 
+(def faster-get-state-id (memoize get-state-id))
+
+(def faster-get-city-id (memoize get-city-id))
+
+
+
 (defmulti dump-on-db
   "Dumps the contents of the provided source onto the database specified by db-spec.
    If source is a HashMap, it must have a shape that conforms to #'crawl-buffer. All other sources
@@ -356,18 +372,31 @@
   [source db-spec]
   (let [entries (.get source "urls")
         category (.get source "category")
-        category-id (or (get-category-id db-spec category) (insert-category db-spec category))
-        lead-data (LinkedList.)]
+        category-id (or (get-category-id db-spec category)
+                        (insert-category db-spec category))
+        timezone-id (get-timezone-id db-spec (.get source "timezone"))]
     ;; inserts url, phone number, and state and city data.
-    (jdbc/insert-multi! db-spec :leads [:category_id :state_id :lead_url :lead_phone]
-                        (persistent! (reduce (fn [results current-lead]
-                                               (let [lead-map (.get source current-lead)
-                                                     state (.get lead-map "state")
-                                                     state-id (get-state-id db-spec state)
-                                                     city (.get lead-map "city")
-                                                     city-id (or (get-city-id db-spec city) (insert-city db-spec state city))]
-                                                 (.add lead-data [current-lead category-id state-id])
-                                                 (conj! results [category-id state-id current-lead (.get lead-map "phone")])))
+    (jdbc/insert-multi! db-spec :leads [:category_id :timezone_id :state_id :city_id :lead_url :lead_phone :seo_value :ppc_value]
+                        (persistent! (reduce (fn [results lead-url]
+                                               (let [lead-map (.get source lead-url)
+                                                     state-id (faster-get-state-id db-spec (.get lead-map "state"))
+                                                     city-id (faster-get-city-id db-spec (.get lead-map "city"))
+                                                     seo (if-bound seo (and (not= nil :binding)
+                                                                            (not (empty? :binding)))
+                                                                   {:binding (get lead-map "seo") :else-binding 0}
+                                                                   seo)
+                                                     ppc (if-bound ppc (and (not= nil :binding)
+                                                                            (not (empty? :binding)))
+                                                                   {:binding (get lead-map "ppc") :else-binding 0}
+                                                                   ppc)
+                                                     phone (if-bound phone (and (not= nil :binding)
+                                                                                (not (empty? :binding)))
+                                                                     {:binding (get lead-map "phone") :else-binding "n/a"}
+                                                                     phone)]
+                                                 (conj! results [category-id timezone-id state-id city-id lead-url phone seo ppc])))
                                              (transient [])
-                                             entries)))
-    :done!))
+                                             entries)))))
+
+(defn save-to-db
+  ([] (save-to-db db-spec))
+  ([db-spec] (dump-on-db db-spec crawl-buffer)))

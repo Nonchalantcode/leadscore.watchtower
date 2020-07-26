@@ -2,7 +2,8 @@
   (:import java.util.function.Consumer
            (java.util HashSet LinkedList)
            (java.io File FileReader BufferedReader InputStreamReader))
-  (:require [clojure.inspector :refer (inspect-tree)]))
+  (:require [clojure.inspector :refer (inspect-tree)]
+            [clojure.walk :refer (postwalk)]))
 
 (defn noop [])
 
@@ -105,3 +106,19 @@
 
 (defn get-in! [^java.util.HashMap m & ks]
   (reduce (fn [acc curr] (.get acc curr)) m ks))
+
+(defmacro if-bound
+  "Binds to identifer to :binding if the conditional form is logically true, else identifier is
+   bound to the value of :else-binding. 
+   The values of :binding and :else-binding are passed in a map argument with keys corresponding to these two keywords. Takes additional forms as the body of the macro. Example:
+   (if-bound x (> 10 :binding) {:binding (Math/sqrt (rand-int 1000)) :else-binding 100} (println x))"
+  [identifier conditional-form opts-map & body]
+  (let [tbinding (gensym)
+        ebinding (gensym)]
+    `(let [~tbinding ~(:binding opts-map)
+           ~ebinding ~(:else-binding opts-map)
+           ~identifier (if ~(postwalk (fn [v] (if (= v :binding) tbinding (identity v)))
+                                      conditional-form)
+                         ~tbinding
+                         ~ebinding)]
+       ~@body)))
