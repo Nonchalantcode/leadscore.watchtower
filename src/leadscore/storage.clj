@@ -11,7 +11,6 @@
             [leadscore.functions :refer (iterate!
                                          read-lines
                                          get-hostname
-                                         load-config
                                          load-veto-lists
                                          noop
                                          inspect-buffer
@@ -45,72 +44,66 @@
 
 (declare save-to-buffer)
 
-#_(defn save-to-buffer
-  "Saves the contents from the incoming InputStream into the leads-buffer var which is a hashmap."
-  [{:strs [category state city]} ^java.io.InputStream in]
+(defn- populate-db-leads-buffer [category state city]
   (cond
-    ;; If category doesn't exists in db-leads-buffer, register it together with the State.
     (nil? (get-in! db-leads-buffer category))
     (do (.put db-leads-buffer category (HashMap.))
         (.put (get-in! db-leads-buffer category) state (HashMap.))
-        ;; Get the state-wide leads in put them in a "leads" slot
-        (.put (get-in! db-leads-buffer category state) "leads" (query-leads category state))
+        (.put (get-in! db-leads-buffer category state) "leads" (query-leads db-spec category state))
         (if (seq city)
-          (.put (get-in! db-leads-buffer category state) city (query-leads category state city))
+          (.put (get-in! db-leads-buffer category state) city (query-leads db-spec category state city))
           (noop)))
-    ;; If category exists in db-leads-buffer, but the State doesnt, register it)
     (nil? (get-in! db-leads-buffer category state))
     (do (.put (get-in! db-leads-buffer category) state (HashMap.))
-        (.put (get-in! db-leads-buffer category state) "leads" (query-leads category state))
+        (.put (get-in! db-leads-buffer category state) "leads" (query-leads db-spec category state))
         (if (seq city)
-          (.put (get-in! db-leads-buffer category state) city (query-leads category state city))))
-    ;; If category and state exist in db-leads-buffer but not the city; register it.
+          (.put (get-in! db-leads-buffer category state) city (query-leads db-spec category state city))))
     (not (nil? (get-in! db-leads-buffer category state)))
     (if (seq city)
-      (.put (get-in! db-leads-buffer category state) city (query-leads category state city))))
+      (.put (get-in! db-leads-buffer category state) city (query-leads db-spec category state city)))))
 
-  (let [leads (HashSet. 200)
-        db-state-wide-results ^HashSet (get-in! db-leads-buffer category state "leads")
-        city-state-results ^HashSet (or (get-in! db-leads-buffer category state city)
-                                        (HashSet.))]
-
-    (read-lines in (fn [lead-url]
-                   (if (or (in-vetolist? veto-list lead-url)
-                           (.contains db-state-wide-results lead-url)
-                           (.contains city-state-results lead-url))
-                     (println "Omitting" lead-url)
-                     (.add leads lead-url))))
-
-      ;; If the current category being processed is not in #'leads-buffer, add it.
-    (if (nil? (get-in! leads-buffer category))
-      (do (.put leads-buffer category (HashMap.))
-          (doto (get-in! leads-buffer category)
-            (.put state (HashMap.)))
-          (doto (get-in! leads-buffer category state)
-            (.put "leads" (HashSet.))
-            (.put "cities" (HashMap.))))
-        ;; If the category exists. Test if the current State is part of that category
-      (if (nil? (get-in! leads-buffer category state))
-        (do (doto (get-in! leads-buffer category)
-              (.put state (HashMap.)))
-            (doto (get-in! leads-buffer category state)
-              (.put "leads" (HashSet.))
-              (.put "cities" (HashMap.))))))
-
-      ;; If the city binding is not an empty string
-    (if (not (empty? city))
-      (cond
-          ;; If the current city isn't already in #'leads-buffer
-        (nil? (get-in! leads-buffer category state "cities" city))
-        (.put (get-in! leads-buffer category state "cities") city leads)
-
-          ;; Both the state and city are in #'leads-buffer. Merge values.
-        (not (nil? (get-in! leads-buffer category state "cities" city)))
-        (.addAll (get-in! leads-buffer category state "cities" city) leads))
-
-          ;; If the city binding is an empty string
-      (.addAll (get-in! leads-buffer category state "leads") leads))
-    :done!))
+(defn save-to-buffer
+  "Saves the contents from the incoming InputStream into the leads-buffer var which is a hashmap."
+  [{:strs [category state city]} ^java.io.InputStream inputstream]
+  (let [leads (HashSet. 200)]
+    (try
+      (populate-db-leads-buffer category state city)
+      (let [db-state-wide-results ^HashSet (get-in! db-leads-buffer category state "leads")
+            city-state-results ^HashSet (or (get-in! db-leads-buffer category state city)
+                                            (HashSet.))]
+        (read-lines inputstream (fn [lead-url]
+                                  (if (or (in-vetolist? veto-list lead-url)
+                                          (.contains db-state-wide-results lead-url)
+                                          (.contains city-state-results lead-url))
+                                    (println "Omitting" lead-url)
+                                    (.add leads lead-url)))))
+      (catch Exception e
+        (println "Caught exception: " (.getMessage e))
+        (println "Running without database")
+        (read-lines inputstream #(if (in-vetolist? veto-list %)
+                                   (println "Omitting" %)
+                                   (.add leads %))))
+      (finally
+        (if (nil? (get-in! leads-buffer category))
+          (do (.put leads-buffer category (HashMap.))
+              (doto (get-in! leads-buffer category)
+                (.put state (HashMap.)))
+              (doto (get-in! leads-buffer category state)
+                (.put "leads" (HashSet.))
+                (.put "cities" (HashMap.))))
+          (if (nil? (get-in! leads-buffer category state))
+            (do (doto (get-in! leads-buffer category)
+                  (.put state (HashMap.)))
+                (doto (get-in! leads-buffer category state)
+                  (.put "leads" (HashSet.))
+                  (.put "cities" (HashMap.))))))
+        (if (not (empty? city))
+          (cond
+            (nil? (get-in! leads-buffer category state "cities" city))
+            (.put (get-in! leads-buffer category state "cities") city leads)
+            (not (nil? (get-in! leads-buffer category state "cities" city)))
+            (.addAll (get-in! leads-buffer category state "cities" city) leads))
+          (.addAll (get-in! leads-buffer category state "leads") leads))))))
 
 (defn- write-table-head [^java.io.Writer csv-file & column-names]
   (.write csv-file (join "," column-names))

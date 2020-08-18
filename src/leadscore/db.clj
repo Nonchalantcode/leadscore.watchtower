@@ -1,13 +1,14 @@
 (ns leadscore.db
-  (:require [leadscore.functions :refer (if-bound)]
+  (:require (leadscore [functions :refer (if-bound)]
+                      [config :refer (config)])
             [clojure.java.jdbc :as jdbc]))
 
-#_(defn- query-leads
+(defn query-leads
   "Queries the 'leads' table for leads associated to a particular category from the 'category' table and also
    for leads associated to a particular state from the 'state' table. The city parameter is optional, but highly-recommended to use for more location-specific leads and faster querying. 
    Returns a java.util.HashSet"
-  ([category state] (query-leads category state nil))
-  ([category state city]
+  ([db-spec category state] (query-leads db-spec category state nil))
+  ([db-spec category state city]
    (let [param-query1 ["SELECT lead_url FROM leads INNER JOIN category USING (category_id) 
                         INNER JOIN state USING (state_id) 
                         WHERE category_name = ?
