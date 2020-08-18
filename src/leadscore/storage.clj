@@ -11,7 +11,7 @@
                                          buffers-dir 
                                          separator)]
             [leadscore.functions :refer (iterate!
-                                         for-each
+                                         read-lines
                                          get-hostname
                                          load-config
                                          load-veto-lists
@@ -142,7 +142,7 @@
         city-state-results ^HashSet (or (get-in! db-leads-buffer category state city)
                                         (HashSet.))]
 
-    (for-each in (fn [lead-url]
+    (read-lines in (fn [lead-url]
                    (if (or (in-vetolist? veto-list lead-url)
                            (.contains db-state-wide-results lead-url)
                            (.contains city-state-results lead-url))

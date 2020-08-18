@@ -44,45 +44,45 @@
 (derive java.io.FileReader ::readable)
 (derive java.io.InputStreamReader ::readable)
 
-(defmulti for-each
+(defmulti read-lines
   "Iterates over the entries of a text stream represented by a file path string,
    a java.io.File, or any instance of java.io.InputStream which can be interpreted as a character stream"
   (fn [handle callback]
     (type handle))
   :default java.lang.String)
 
-(defmethod for-each java.lang.String
+(defmethod read-lines java.lang.String
   [handle callback]
-  (for-each (File. handle) callback))
+  (read-lines (File. handle) callback))
 
-(defmethod for-each java.io.File
+(defmethod read-lines java.io.File
   [handle callback]
-  (for-each (FileReader. handle) callback))
+  (read-lines (FileReader. handle) callback))
 
-(defmethod for-each java.io.InputStream
+(defmethod read-lines java.io.InputStream
   [handle callback]
-  (for-each (InputStreamReader. handle) callback))
+  (read-lines (InputStreamReader. handle) callback))
 
-(defmethod for-each ::readable
+(defmethod read-lines ::readable
   [handle callback]
   (with-open [contents (-> handle (BufferedReader.) (.lines))]
     (.forEach contents (reify Consumer
                          (accept [this v] (callback v))))))
 
-(defmethod for-each java.util.stream.Stream
+(defmethod read-lines java.util.stream.Stream
   [handle callback]
   (.forEach handle (reify Consumer
                      (accept [this v] (callback v)))))
 
 (defn load-config [config-file]
   (let [conf (StringBuilder.)]
-    (for-each config-file #(.append conf ^CharSequence %))
+    (read-lines config-file #(.append conf ^CharSequence %))
     (read-string (.toString conf))))
 
 (defn load-veto-lists [& sources]
   (let [veto-list (HashSet.)]
     (doseq [source sources]
-      (for-each source #(.add veto-list %)))
+      (read-lines source #(.add veto-list %)))
     veto-list))
 
 (defn async-call
