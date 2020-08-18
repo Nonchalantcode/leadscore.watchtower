@@ -6,11 +6,12 @@
            [java.util Date
             LinkedList])
   (:require (clojure [string :refer (replace-first starts-with?)])
-            (leadscore [constants :as constants :refer (phone-matcher asummed-user-agent)]
-                       [report])))
+            (leadscore [config :refer (config)])))
 
 (def ^:private ^:const default-phone-info {:number nil, :latency 0})
 (def ^:private ^:const default-email-info {:email nil, :latency 0})
+(def ^:private phone-matcher (:phone-matcher config))
+(def ^:private asummed-user-agent (:asummed-user-agent config))
 
 (set! *warn-on-reflection* true)
 

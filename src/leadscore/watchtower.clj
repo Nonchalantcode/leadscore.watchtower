@@ -5,13 +5,11 @@
             BufferedReader]
            java.util.function.Consumer)
   (:require [leadscore.spy-fu :as spy-fu]
-            [leadscore.constants :refer (separator user-dir resources-dir)]
+            [leadscore.config :refer (config)]
             [leadscore.netcore :as netcore]
-            [leadscore.report :as report]
             [leadscore.storage :as storage
              :refer (leads-buffer
                      crawl-buffer
-                     db-spec
                      api-key
                      export-buffer
                      load-crawl-buffer
@@ -26,6 +24,10 @@
             (ring.mock [request :as r :refer :all])
             (compojure [core :refer :all]))
   (:gen-class))
+
+(def ^:private separator (:separator config))
+(def ^:private user-dir (:user-dir config))
+(def ^:private resources-dir (:resources-dir config))
 
 (set! *warn-on-reflection* true)
 
