@@ -42,8 +42,6 @@
 (defn- in-vetolist? [^HashSet veto-list ^String url]
   (.contains veto-list (get-hostname url)))
 
-(declare save-to-buffer)
-
 (defn- populate-db-leads-buffer [category state city]
   (cond
     (nil? (get-in! db-leads-buffer category))
@@ -63,26 +61,27 @@
       (.put (get-in! db-leads-buffer category state) city (query-leads db-spec category state city)))))
 
 (defn save-to-buffer
-  "Saves the contents from the incoming InputStream into the leads-buffer var which is a hashmap."
-  [{:strs [category state city]} ^java.io.InputStream inputstream]
+  "Saves the contents from the incoming Urls-Coll into the leads-buffer var which is a hashmap."
+  [{:strs [category state city]} urls-coll]
   (let [leads (HashSet. 200)]
     (try
       (populate-db-leads-buffer category state city)
       (let [db-state-wide-results ^HashSet (get-in! db-leads-buffer category state "leads")
             city-state-results ^HashSet (or (get-in! db-leads-buffer category state city)
                                             (HashSet.))]
-        (read-lines inputstream (fn [lead-url]
-                                  (if (or (in-vetolist? veto-list lead-url)
-                                          (.contains db-state-wide-results lead-url)
-                                          (.contains city-state-results lead-url))
-                                    (println "Omitting" lead-url)
-                                    (.add leads lead-url)))))
+        (doseq [url urls-coll]
+          (if (or (in-vetolist? veto-list url)
+                  (.contains db-state-wide-results url)
+                  (.contains city-state-results url))
+            (println "Omitting" url)
+            (.add leads url))))
+        
       (catch Exception e
-        (println "Caught exception: " (.getMessage e))
-        (println "Running without database")
-        (read-lines inputstream #(if (in-vetolist? veto-list %)
-                                   (println "Omitting" %)
-                                   (.add leads %))))
+        (doseq [url urls-coll]
+          (if (in-vetolist? veto-list url)
+                                   (println "Omitting" url)
+                                   (.add leads url))))
+      
       (finally
         (if (nil? (get-in! leads-buffer category))
           (do (.put leads-buffer category (HashMap.))
@@ -90,13 +89,13 @@
                 (.put state (HashMap.)))
               (doto (get-in! leads-buffer category state)
                 (.put "leads" (HashSet.))
-                (.put "cities" (HashMap.))))
-          (if (nil? (get-in! leads-buffer category state))
+                (.put "cities" (HashMap.)))))
+        (if (nil? (get-in! leads-buffer category state))
             (do (doto (get-in! leads-buffer category)
                   (.put state (HashMap.)))
                 (doto (get-in! leads-buffer category state)
                   (.put "leads" (HashSet.))
-                  (.put "cities" (HashMap.))))))
+                  (.put "cities" (HashMap.)))))
         (if (not (empty? city))
           (cond
             (nil? (get-in! leads-buffer category state "cities" city))

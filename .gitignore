@@ -18,3 +18,7 @@ LICENSE
 test/
 reports/
 resources/.ENV
+resources/buffers/
+*~
+*#
+.calva/

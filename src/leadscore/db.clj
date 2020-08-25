@@ -3,6 +3,14 @@
                       [config :refer (config)])
             [clojure.java.jdbc :as jdbc]))
 
+(defn is-db-online [db-spec]
+  (try
+    (jdbc/query db-spec ["show tables"])
+    (identity true)
+    (catch Exception ex
+      (println (.getMessage ex))
+      (identity false))))
+
 (defn query-leads
   "Queries the 'leads' table for leads associated to a particular category from the 'category' table and also
    for leads associated to a particular state from the 'state' table. The city parameter is optional, but highly-recommended to use for more location-specific leads and faster querying. 
