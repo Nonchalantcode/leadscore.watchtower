@@ -17,8 +17,8 @@
                                          get-in!)]
             [leadscore.db :refer :all]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch)
-                              :rename {await-batch crawl-batch}]
-            [leadscore.netcore :refer (get-numbers get-emails)]
+                              :rename {await-batch crawl-batch}]            
+            [leadscore.netcore :refer (crawl-urls)]
             [clojure.string :refer (join split)]
             [cheshire.core :refer :all]))
 
@@ -192,7 +192,7 @@
                                       (.put "ppc" ppc)
                                       (.put "phone" phone))))))))
 
-(defn populate-crawl-buffer!
+#_(defn populate-crawl-buffer!
   "Fills the #'crawl-buffer var with either phone-number information
    for the urls provided, or seo and ppc data from spy fu, or both"
   [opts]

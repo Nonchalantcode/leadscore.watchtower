@@ -1,11 +1,15 @@
 (ns leadscore.netcore
   (:import [java.net URL HttpURLConnection MalformedURLException]
-           [java.io InputStream
+           [java.io
+            InputStream
             InputStreamReader
+            BufferedReader
             IOException]
-           [java.util Date
+           [java.util
+            Date
             LinkedList])
   (:require (clojure [string :refer (replace-first starts-with?)])
+            [cheshire.core :as JSON]
             (leadscore [config :refer (config)])))
 
 (def ^:private ^:const default-phone-info {:number nil, :latency 0})
@@ -18,50 +22,19 @@
 (defmacro try-match [str-source & regexes]
   `(or ~@(map (fn [reg] `(re-find ~reg ~str-source)) regexes)))
 
-(defn query-url
-  "Open an InputStream on an instance of java.net.URL"
-  [^String url]
+(defmacro ends-with [str-value & suffixes]
+  `(or ~@(map (fn [v] `(. ~str-value ~'endsWith ~v)) suffixes)))
+
+(defn is-valid-URL? [^String URL]
   (try
-    (-> url (URL.) (.openStream))
-    (catch MalformedURLException e
-      (println "Malformed URL. Probably missing its protocol."))
-    (catch IOException e
-      (println (.getMessage e)))))
-
-(defn read-as-text-stream
-  "Reads the contents of an InputStream by wrapping it in an InputStreamReader"
-  [^InputStream in ^Integer buffsize arrsize]
-  (with-open [source (InputStreamReader. in)]
-    (loop [contents (StringBuffer. buffsize) arr (char-array arrsize)]
-      (let [n (.read source arr 0 arrsize)]
-        (if (not= -1 n)
-          (recur (.append contents (.trim (String. arr))) (char-array arrsize))
-          (.toString contents))))))
-
-(defn read-url-source
-  ([^InputStream url-stream]
-   (read-as-text-stream url-stream 2014 256))
-  ([^InputStream url-stream buffsize arrsize]
-   (read-as-text-stream url-stream buffsize arrsize)))
-
-(defn isCanonicalUrl [^String uri]
-  (try
-    (if (URL. uri) true)
+    (if (URL. URL) true)
     (catch MalformedURLException e false)))
 
-(defn toCanonicalUrl
-  "Asumming the hostname is present in URL and the only thing needed to make it canonical is the protocol"
+(defn prepend-protocol
   [^String url]
   (cond
     (starts-with? url "http") url
     :else (str "http://" url)))
-
-(defn toCanonicalSecureUrl
-  [^String url]
-  (cond
-    (starts-with? url "https") url
-    (starts-with? url "http") (replace-first url "http" "https")
-    :else (str "https://" url)))
 
 (defn- are-same-numbers [& numbers]
   (= (map #(apply str (re-seq #"\d+" %)) numbers)))
@@ -75,136 +48,119 @@
       (take 1 first-two)
       (identity first-two))))
 
-(defmacro ends-with [str-value & suffixes]
-  `(or ~@(map (fn [v] `(. ~str-value ~'endsWith ~v)) suffixes)))
+(defn get-phone-number [page-html]
+  (if (or (nil? page-html) (empty? page-html))
+    nil
+    (first-two-results (re-seq phone-matcher page-html))))
 
-(defn- set-req-property [^HttpURLConnection connection prop val]
-  (doto connection (.setRequestProperty prop val)))
+(defn get-email-address [page-html]
+  (if (or (nil? page-html) (empty? page-html))
+    nil
+    (try-match page-html #"[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\.\w{2,4}")))
 
-(defn- open-connection ^HttpURLConnection [^String url & {:keys [secure?] :or {secure? false}}]
-  (set-req-property
-   (if secure?
-     (-> url toCanonicalSecureUrl URL. .openConnection)
-     (-> url toCanonicalUrl URL. .openConnection))
-   "user-agent" asummed-user-agent))
+(defmacro open-HTTP-connection [^String URL & forms]
+  (let [url-instance (gensym "url-instance")
+        http-connection (gensym "http-connection")]
+    `(let [~url-instance (if (is-valid-URL? ~URL)
+                           (URL. ~URL)
+                           (URL. (prepend-protocol ~URL)))
+           ~http-connection (.openConnection ^java.net.URL ~url-instance)]
+       (do ~@(map (fn [[method & args]] (list* method http-connection args))
+                  forms)
+           (.connect ~http-connection)
+           (identity ~http-connection)))))
 
-(defn- get-stream ^InputStream [^HttpURLConnection connection]
-  (.getInputStream connection))
-
-(defn follow-redirect [^HttpURLConnection connection]
+(defn open-inputstream [^java.net.URLConnection connection]
   (let [location (.getHeaderField connection "Location")]
-    (if (starts-with? location "https")
-      (open-connection location :secure? true)
-      (open-connection location))))
+    (if (nil? location)
+      (.getInputStream connection)
+      (open-inputstream (open-HTTP-connection location
+                                              (.setConnectTimeout 7000)
+                                              (.setReadTimeout 5000)
+                                              (.setRequestProperty
+                                               "User-Agent" (:asummed-user-agent config)))))))
 
-(defn- read-from-connection
-  [^HttpURLConnection connection & {:keys [buff1 buff2 callback]
-                                    :or {buff1 (* 1024 4)
-                                         buff2 (* 256 1)
-                                         callback identity}}]
-  (with-open [stream (get-stream connection)]
-    (callback (read-as-text-stream stream buff1 buff2))))
+(defn read-page-source [^String URL]
+  (try (with-open [reader (-> (open-inputstream
+                               (open-HTTP-connection URL
+                                                     (.setConnectTimeout 7000)
+                                                     (.setReadTimeout 5000)
+                                                     (.setRequestProperty
+                                                      "User-Agent" (:asummed-user-agent config))))
+                              (InputStreamReader.)
+                              (BufferedReader.))]
+         (let [lines-stream (.lines reader)
+               source-html (StringBuilder. 1000)]
+           (.forEach lines-stream (reify java.util.function.Consumer
+                                    (accept [this line]
+                                      (.append source-html ^String line))))
+           (.toString source-html)))
+       (catch Exception err
+         (println (.getMessage err)))))
+           
+(defn request-webpage-source
+  "Return a lazyseq of urls mapped to the html source associated to the pages' urls"
+  [urls-coll & {:keys [concurrent-ops] :or {concurrent-ops 3}}]
+  (let [initial-count (if (> (count urls-coll) concurrent-ops) concurrent-ops (count urls-coll))
+        counter (atom initial-count)
+        initial (map (fn [url] (future (try (let [url-source (read-page-source url)]
+                                              (swap! counter inc)
+                                              {:info {:url url, :html url-source}})
+                                            (catch Exception err
+                                              (swap! counter inc)
+                                              {:info {:url url, :html nil}}))))
+                     urls-coll)
+        results (promise)]
+    (doall (take initial-count initial))
+    (add-watch counter :counter (fn [_k _r oldcount newcount]
+                                  (println "Crawled so far: " (- newcount initial-count))
+                                  (if (= (count urls-coll) newcount)
+                                    (deliver results (map deref initial))
+                                    (doall (take newcount initial)))))
+    (deref results)))
+    
+(defn crawl-urls
+  "Takes a collection of urls and tries to pull information from their HTML source. Takes an optional
+  :opt param with values :phone, :email, or nil. An optional :concurrent-ops param indicates how many
+  simultaneous network requests to make"
+  [urls-coll & {:keys [opt concurrent-ops] :or {concurrent-ops 3}}]
+  (let [urls-info (request-webpage-source urls-coll)]
+    (condp = opt
+      :phone (reduce (fn [results {{:keys [url html]} :info}]
+                       (assoc results url {:phone (get-phone-number html)}))
+                     (hash-map)
+                     urls-info)
+      :email (reduce (fn [results {{:keys [url html]} :info}]
+                       (assoc results url {:email (get-email-address html)}))
+                       (hash-map)
+                       urls-info)
+      (reduce (fn [results {{:keys [url html]} :info}]
+                        (assoc results url {:email (get-email-address html)
+                                            :phone (get-phone-number html)}))
+                      (hash-map)
+                      urls-info))))
 
-(defn get-phone-match [^String source-str]
-  (re-seq phone-matcher source-str))
 
-(defn get-phone-number [host]
-  (try
-    (let [connection (open-connection host)
-          status-code (.getResponseCode connection)
-          follow-redirect (fn [^HttpURLConnection con]
-                            (-> con
-                                (follow-redirect)
-                                (read-from-connection :callback get-phone-match)
-                                (first-two-results)))]
-      (cond
-        (= 200 status-code)
-        (-> connection (read-from-connection :callback get-phone-match) (first-two-results))
 
-        (or (= 301 status-code) (= 302 status-code) (= 307 status-code) (= 308 status-code))
-        (follow-redirect connection)
 
-        (= 403 status-code)
-        (throw (java.io.IOException. "Unable to read from this connection. 403"))
-
-        (= 503 status-code)
-        (throw (java.io.IOException. "Server responded with a 503 status code."))))
-    (catch IOException ex
-      (println "Host" [host] "failed with reason: " (.getMessage ex)))
-    (catch Exception ex
-      (println (.getMessage ex)))))
-
-(defn get-email-addr [^String url]
-  (try
-    (let [connection (doto (open-connection url) (.setConnectTimeout 10000) (.setReadTimeout 10000))
-          status (.getResponseCode connection)
-          page-source (cond
-                        (= status 200) (read-from-connection connection)
-
-                        (and (>= status 300) (<= status 308)) (-> (follow-redirect connection)
-                                                                  (read-from-connection))
-
-                        (>= status 400) nil)]
-
-      (if (nil? page-source)
-        nil
-        #_(try-match page-source
-                   ;; trivial case: email addresses inside <a> elements 
-                     #"(?<=mailto:)[^\"]+"
-                     #"[a-zA-Z0-9]+@[a-zA-Z0-9]+\.\w{2,4}"
-                   ;; email addresses preceded by opening html tags, colons, or a space character
-                     #"(?<=(>|\s|:))[\w\-]+@[\w\-]+\.\w{2,4}")
-        (try-match page-source
-                   #"[a-zA-Z0-9_-]+@[a-zA-Z0-9_-]+\.\w{2,4}")))
-    (catch Exception ex
-      (println "Host [" url "]" "has thrown an exception:\n\t" (.getMessage ex)))))
-
-(defn- map-info [^String url key callback]
-  (let [t1 (.getTime (Date.))]
-    (-> (assoc (hash-map) url {key (callback url) :latency (- (.getTime (Date.)) t1)}))))
-
-(defn- map-phone-info [^String url]
-  (map-info url :number get-phone-number))
-
-(defn- map-email-info [^String url]
-  (map-info url :email get-email-addr))
-
-(defn- assoc-default-info [^String url default-info]
-  (assoc {} url default-info))
-
-(defn defer-crawl
-  [url-collecttion callback]
-  (doall (map (fn [url] [url (future (callback url))]) url-collecttion)))
-
-(defn proces-crawl-chunk
-  [crawl-coll timeout callback]
-  (let [partial-results (defer-crawl crawl-coll callback) sink (LinkedList.)]
-    [(reduce (fn [acc [url results-map]]
-               (merge acc (deref results-map timeout
-                                 (do (.add sink [url results-map])
-                                     {}))))
-             (hash-map)
-             partial-results) sink]))
-
-(defn crawl
-  [url-collection crawl-callback & {:keys [concurrent-requests timeout default-info]
-                                    :or {concurrent-requests 6, timeout 2000}}]
-  (let [chunks (partition concurrent-requests concurrent-requests nil url-collection)
-        stuck-connections (LinkedList.)
-        resolved-connections (reduce (fn [acc curr-chunk]
-                                       (let [[processed-chunk unprocessed] (proces-crawl-chunk curr-chunk timeout crawl-callback)]
-                                         (.addAll stuck-connections unprocessed)
-                                         (merge acc processed-chunk)))
-                                     (hash-map)
-                                     chunks)]
-    (reduce (fn [acc [url f]]
-              (merge acc (if (realized? f)
-                           @f
-                           (assoc-default-info url default-info))))
-            resolved-connections stuck-connections)))
-
-(defn get-numbers [url-collection]
-  (crawl url-collection map-phone-info :default-info default-phone-info))
-
-(defn get-emails [url-collection]
-    (crawl url-collection map-email-info :timeout 2500 :default-info default-email-info))
+#_(defn- summarize-leads
+  [leads-json out-filename & {:keys [outdir] :or {outdir (. System getProperty "user.home")}}]
+  (let [leads-map (reduce (fn [result {:strs [url category state city]}]
+                            (-> result
+                                (assoc url {:category category :state state :city city})
+                                (update-in [:urls] conj url)))
+                          (identity {:urls []})
+                          leads-json)
+        urls (:urls leads-map)
+        results (get-emails urls)
+        filtered-results (reduce (fn [acc [url crawl-result]]
+                                   (if (nil? (:email crawl-result))
+                                     (identity acc)
+                                     (assoc acc url (merge (leads-map url) crawl-result))))
+                                 (hash-map)
+                                 results)
+        outfile (doto (java.io.File. (str outdir (:separator config) out-filename ".csv"))
+                  (.createNewFile))]
+    (with-open [out (java.io.FileWriter. outfile)]
+      (doseq [[url {:keys [category state city email]}] filtered-results]
+        (.write out (str category "," state "," city "," url "," email "\n"))))))
