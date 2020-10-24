@@ -32,7 +32,7 @@
 
 (set! *warn-on-reflection* true)
 
-(defn view-active-categories [] (keys leads-buffer))
+(defn get-active-categories [] (keys leads-buffer))
 
 (defn crawl-phone-info [] (storage/populate-crawl-buffer! {:phone? true}))
 
@@ -51,7 +51,20 @@
      {:validApiKey (spy-fu/valid-apiKey? spyfu-api-key)
       :validDBCredentials (is-db-online db-spec)}))
 
-;;(defn register-api-key [
+(defn count-leads-for [category-name]
+  (let [states (keys (get leads-buffer category-name))]
+    (reduce (fn [total current-state]
+              (let [cities-map (get-in leads-buffer [category-name current-state "cities"])
+                    cities (keys cities-map)]
+                (+ total
+                   (apply + (map #(count (get-in leads-buffer [category-name current-state "cities" %]))
+                                 cities)))))
+                
+            (identity 0)
+            (identity states))))
+
+(defn get-total-leads-count []
+  (apply + (map count-leads-for (get-active-categories))))
 
 (defn as-json [v]
   (-> v 
@@ -71,14 +84,21 @@
   (GET "/api/leads" []
        (as-json {:message "Hello, world"}))
   (GET "/api/status" []
-       (as-json (test-initial-conf)))
+       (as-json (assoc (test-initial-conf) :leadcount (get-total-leads-count))))
+  (GET "/leads/count" []
+       (as-json {:leadcount (get-total-leads-count)}))
+  (GET "/leads/categories" []
+       (as-json {:categories (get-active-categories)}))
   (POST "/api/spyfu" request
         (let [body (JSON/parse-stream (java.io.InputStreamReader. (:body request)))]
           (println body)))
-  (POST "/api/buffer" {:keys [params body]}
-        (let [body (JSON/parse-stream (java.io.InputStreamReader. body))]
-          (do (storage/save-to-buffer params body)
-                (response/response "Stored")))))
+  (POST "/api/upload" {:keys [params body]}
+        (try
+          (let [body (JSON/parse-stream (java.io.InputStreamReader. body))]
+            (do (storage/save-to-buffer params body)
+                (as-json {:message "stored" :leadcount (get-total-leads-count)})))
+          (catch Exception err
+            (do (response/response (.getMessage err)))))))
           
 
 (def app (fn [request-map]
@@ -86,5 +106,8 @@
                params-request
                routes-table
                cors)))
+               
 
 (def server (run-jetty #'app {:join? false, :port (:port config)}))
+
+

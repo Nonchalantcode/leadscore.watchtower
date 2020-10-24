@@ -97,26 +97,38 @@
            (.toString source-html)))
        (catch Exception err
          (println (.getMessage err)))))
-           
+
+(defn- lazy-read-page-source-urls [urls-coll f]
+  (if (nil? urls-coll)
+    (identity nil)
+    (lazy-seq
+     (cons (f (first urls-coll))
+           (lazy-read-page-source-urls (next urls-coll) f)))))
+
 (defn request-webpage-source
   "Return a lazyseq of urls mapped to the html source associated to the pages' urls"
   [urls-coll & {:keys [concurrent-ops] :or {concurrent-ops 3}}]
   (let [initial-count (if (> (count urls-coll) concurrent-ops) concurrent-ops (count urls-coll))
-        counter (atom initial-count)
-        initial (map (fn [url] (future (try (let [url-source (read-page-source url)]
-                                              (swap! counter inc)
-                                              {:info {:url url, :html url-source}})
-                                            (catch Exception err
-                                              (swap! counter inc)
-                                              {:info {:url url, :html nil}}))))
-                     urls-coll)
+        counter (atom 0)
+        initial (lazy-read-page-source-urls urls-coll
+                                            (fn [url]
+                                              (future
+                                                (try
+                                                  (let [url-source (read-page-source url)]
+                                                    (swap! counter inc)
+                                                    {:info {:url url, :html url-source}})
+                                                  (catch Exception err
+                                                    (swap! counter inc)
+                                                    {:info {:url url, :html nil}})))))
+                                                
+
         results (promise)]
     (doall (take initial-count initial))
     (add-watch counter :counter (fn [_k _r oldcount newcount]
-                                  (println "Crawled so far: " (- newcount initial-count))
+                                  (println "Crawled so far: " newcount "/ " (count urls-coll))
                                   (if (= (count urls-coll) newcount)
                                     (deliver results (map deref initial))
-                                    (doall (take newcount initial)))))
+                                    (doall (take (+ newcount initial-count) initial)))))
     (deref results)))
     
 (defn crawl-urls
@@ -127,7 +139,7 @@
   (let [urls-info (request-webpage-source urls-coll)]
     (condp = opt
       :phone (reduce (fn [results {{:keys [url html]} :info}]
-                       (assoc results url {:phone (get-phone-number html)}))
+                       (assoc results url {:phone (apply str (get-phone-number html))}))
                      (hash-map)
                      urls-info)
       :email (reduce (fn [results {{:keys [url html]} :info}]
@@ -141,7 +153,7 @@
                       urls-info))))
 
 
-
+(defn count-pos [results opt] (count (filter (fn [[_ {v opt}]] (not (nil? v))) results)))
 
 #_(defn- summarize-leads
   [leads-json out-filename & {:keys [outdir] :or {outdir (. System getProperty "user.home")}}]

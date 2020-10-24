@@ -26,6 +26,8 @@
 (def ^:private buffers-dir (:buffers-dir config))
 (def ^:private separator (:separator config))
 (def ^:private out-dir (str buffers-dir separator "out"))
+(def db-spec (:db-spec config))
+(def api-key (-> config :spy-fu :api-key))
 ;; Defines the leads-buffer which is just a HashMap containing the list of urls that have been crawled.
 ;; The leads-buffer organizes leads by category, then by state (first, state-wide leads), and then by city
 ;; The leads-buffer isn't 'curated'. It doesn't guarantee that all urls are unique; that guarantee must be provided by the 
@@ -35,8 +37,6 @@
 (def ^:private db-leads-buffer (HashMap.))
 (def ^:private veto-list ^HashSet (load-veto-lists (str resources-dir separator "vetolist")))
 (def leads-buffer (HashMap.))
-(def db-spec (:db-spec config))
-(def api-key (-> config :spy-fu :api-key))
 (def crawl-buffer (HashMap.))
 
 (defn- in-vetolist? [^HashSet veto-list ^String url]
@@ -191,6 +191,13 @@
                                       (.put "seo" seo)
                                       (.put "ppc" ppc)
                                       (.put "phone" phone))))))))
+
+(defn populate-crawl-buffer! [& {:keys [:type :api-key]}]
+  (let [urls (.get crawl-buffer "urls")]
+    (condp = type
+      :phone (doseq [[url {phone :phone}] (crawl-urls urls :opt :phone)]
+               (.put (.get crawl-buffer url) "phone" phone)))))
+               
 
 #_(defn populate-crawl-buffer!
   "Fills the #'crawl-buffer var with either phone-number information
