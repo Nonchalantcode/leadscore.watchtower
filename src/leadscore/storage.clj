@@ -18,7 +18,7 @@
             [leadscore.db :refer :all]
             [leadscore.spy-fu :refer (valid-apiKey? await-batch)
                               :rename {await-batch crawl-batch}]            
-            [leadscore.netcore :refer (crawl-urls)]
+            [leadscore.netcore :refer (crawl-urls get-spyfu-info)]
             [clojure.string :refer (join split)]
             [cheshire.core :refer :all]))
 
@@ -28,11 +28,6 @@
 (def ^:private out-dir (str buffers-dir separator "out"))
 (def db-spec (:db-spec config))
 (def api-key (-> config :spy-fu :api-key))
-;; Defines the leads-buffer which is just a HashMap containing the list of urls that have been crawled.
-;; The leads-buffer organizes leads by category, then by state (first, state-wide leads), and then by city
-;; The leads-buffer isn't 'curated'. It doesn't guarantee that all urls are unique; that guarantee must be provided by the 
-;; client-side crawler program. The leads-buffer needs to be filtered against leads that already exist in the database
-;; for each particular State, and then for each particular city to ensure non-duplicated leads are being crawled.
 
 (def ^:private db-leads-buffer (HashMap.))
 (def ^:private veto-list ^HashSet (load-veto-lists (str resources-dir separator "vetolist")))
@@ -195,66 +190,14 @@
 (defn populate-crawl-buffer! [& {:keys [:type :api-key]}]
   (let [urls (.get crawl-buffer "urls")]
     (condp = type
+      :spyfu (if (nil? api-key)
+               (identity nil)
+               (doseq [[url {:strs [ppc_budget seo_value]}] (get-spyfu-info api-key urls)]
+                 (doto (.get crawl-buffer url)
+                   (.put "ppc" (int ppc_budget))
+                   (.put "seo" (int seo_value)))))
       :phone (doseq [[url {phone :phone}] (crawl-urls urls :opt :phone)]
                (.put (.get crawl-buffer url) "phone" phone)))))
-               
-
-#_(defn populate-crawl-buffer!
-  "Fills the #'crawl-buffer var with either phone-number information
-   for the urls provided, or seo and ppc data from spy fu, or both"
-  [opts]
-  (let [{:keys [both? spy-fu? phone? api-key]} opts
-        filtered-crawl-list (if (.isEmpty crawl-buffer)
-                              (identity nil)
-                              (reduce (fn [acc curr]
-                                        (if (nil? (get-in! crawl-buffer curr "phone"))
-                                          (conj acc curr)
-                                          (noop)))
-                                      (vector)
-                                      (.get crawl-buffer "urls")))
-        search-numbers (fn [urls-coll]
-                         (doall (map (fn [[url {phone-number :number}]]
-                                       (.put (.get crawl-buffer url) "phone" (apply str phone-number)))
-                                     (get-numbers urls-coll))))
-        search-spyfu (fn []
-                       (let [all-urls (.get crawl-buffer "urls")
-                             spy-fu-results (reduce (fn [acc curr] (merge acc (crawl-batch api-key curr)))
-                                                    (hash-map)
-                                                    (partition 10 10 nil all-urls))]
-                         (doseq [curr all-urls]
-                           (let [spy-fu-metrics (spy-fu-results curr)]
-                             (.put (.get crawl-buffer curr) "ppc" (and
-                                                                   spy-fu-metrics
-                                                                   (-> (.get spy-fu-metrics "ppc_budget")
-                                                                       (or 0)
-                                                                       (.longValue))))
-                             (.put (.get crawl-buffer curr) "seo" (and
-                                                                   spy-fu-metrics
-                                                                   (-> (.get spy-fu-metrics "seo_value")
-                                                                       (or 0)
-                                                                       (.longValue))))))))]
-    (cond
-      (.isEmpty crawl-buffer) (noop)
-
-      (and (identity both?) (nil? api-key))
-      (throw (IllegalArgumentException. "No API-KEY was provided."))
-
-      (and (identity both?) (not (valid-apiKey? api-key)))
-      (throw (IllegalArgumentException. "Provided API-KEY is not valid."))
-
-      (identity both?) (do (search-numbers filtered-crawl-list)
-                           (search-spyfu))
-
-      (identity phone?) (search-numbers filtered-crawl-list)
-
-      (and (identity spy-fu?) (nil? api-key))
-      (throw (IllegalArgumentException. "No API-KEY was provided."))
-
-      (and (identity spy-fu?) (not (valid-apiKey? api-key)))
-      (throw (IllegalArgumentException. "Provided API-KEY is not valid."))
-
-      (identity spy-fu?) (search-spyfu))
-    :done!))
 
 (defn- get-crawl-buffer-writer [category filename]
   (-> (str out-dir separator category filename (. System currentTimeMillis) (identity ".csv"))

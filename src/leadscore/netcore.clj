@@ -10,7 +10,8 @@
             LinkedList])
   (:require (clojure [string :refer (replace-first starts-with?)])
             [cheshire.core :as JSON]
-            (leadscore [config :refer (config)])))
+            (leadscore [config :refer (config)]
+                       [spy-fu :refer (query-api)])))
 
 (def ^:private ^:const default-phone-info {:number nil, :latency 0})
 (def ^:private ^:const default-email-info {:email nil, :latency 0})
@@ -98,60 +99,68 @@
        (catch Exception err
          (println (.getMessage err)))))
 
-(defn- lazy-read-page-source-urls [urls-coll f]
+(defn- lazy-process-urls [urls-coll f]
   (if (nil? urls-coll)
     (identity nil)
     (lazy-seq
      (cons (f (first urls-coll))
-           (lazy-read-page-source-urls (next urls-coll) f)))))
+           (lazy-process-urls (next urls-coll) f)))))
 
 (defn request-webpage-source
   "Return a lazyseq of urls mapped to the html source associated to the pages' urls"
-  [urls-coll & {:keys [concurrent-ops] :or {concurrent-ops 3}}]
+  [urls-coll f & {:keys [concurrent-ops] :or {concurrent-ops 3}}]
   (let [initial-count (if (> (count urls-coll) concurrent-ops) concurrent-ops (count urls-coll))
         counter (atom 0)
-        initial (lazy-read-page-source-urls urls-coll
+        initial (lazy-process-urls urls-coll
                                             (fn [url]
                                               (future
                                                 (try
-                                                  (let [url-source (read-page-source url)]
+                                                  (let [url-data (f url)]
                                                     (swap! counter inc)
-                                                    {:info {:url url, :html url-source}})
+                                                    {:info {:url url, :data url-data}})
                                                   (catch Exception err
                                                     (swap! counter inc)
-                                                    {:info {:url url, :html nil}})))))
+                                                    {:info {:url url, :data nil}})))))
                                                 
 
         results (promise)]
     (doall (take initial-count initial))
     (add-watch counter :counter (fn [_k _r oldcount newcount]
-                                  (println "Crawled so far: " newcount "/ " (count urls-coll))
+                                  (println "Crawled so far: " newcount "/" (count urls-coll))
                                   (if (= (count urls-coll) newcount)
                                     (deliver results (map deref initial))
                                     (doall (take (+ newcount initial-count) initial)))))
     (deref results)))
-    
+
 (defn crawl-urls
   "Takes a collection of urls and tries to pull information from their HTML source. Takes an optional
   :opt param with values :phone, :email, or nil. An optional :concurrent-ops param indicates how many
   simultaneous network requests to make"
   [urls-coll & {:keys [opt concurrent-ops] :or {concurrent-ops 3}}]
-  (let [urls-info (request-webpage-source urls-coll)]
+  (let [urls-info (request-webpage-source urls-coll read-page-source)]
     (condp = opt
-      :phone (reduce (fn [results {{:keys [url html]} :info}]
-                       (assoc results url {:phone (apply str (get-phone-number html))}))
+      :phone (reduce (fn [results {{:keys [url data]} :info}]
+                       (assoc results url {:phone (apply str (get-phone-number data))}))
                      (hash-map)
                      urls-info)
-      :email (reduce (fn [results {{:keys [url html]} :info}]
-                       (assoc results url {:email (get-email-address html)}))
+      :email (reduce (fn [results {{:keys [url data]} :info}]
+                       (assoc results url {:email (get-email-address data)}))
                        (hash-map)
                        urls-info)
-      (reduce (fn [results {{:keys [url html]} :info}]
-                        (assoc results url {:email (get-email-address html)
-                                            :phone (get-phone-number html)}))
+      (reduce (fn [results {{:keys [url data]} :info}]
+                        (assoc results url {:email (get-email-address data)
+                                            :phone (get-phone-number data)}))
                       (hash-map)
                       urls-info))))
 
+(defn get-spyfu-info [api-key urls-coll & {concurrent-ops :concurrent-ops}]
+  (let [spyfu-data (request-webpage-source urls-coll (partial query-api api-key))]
+    (reduce (fn [results url-data-map]
+              (let [url (-> url-data-map :info :url)
+                    metrics (-> url-data-map :info :data)]
+                (merge results {url metrics})))
+            (hash-map)
+            (identity spyfu-data))))
 
 (defn count-pos [results opt] (count (filter (fn [[_ {v opt}]] (not (nil? v))) results)))
 
