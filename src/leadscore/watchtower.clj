@@ -34,10 +34,6 @@
 
 (defn get-active-categories [] (keys leads-buffer))
 
-(defn crawl-phone-info [] (storage/populate-crawl-buffer! {:phone? true}))
-
-(defn crawl-spyfu-info [api-key] (storage/populate-crawl-buffer! {:spy-fu? true :api-key api-key}))
-
 (defn reload-veto-list []
   (load-veto-lists (str resources-dir separator "vetolist")))
 
@@ -48,7 +44,7 @@
   []
    (let [spyfu-api-key (-> config :spy-fu :api-key)
          db-spec (-> config :db-spec)]
-     {:validApiKey (spy-fu/valid-apiKey? spyfu-api-key)
+     {:validApiKey false
       :validDBCredentials (is-db-online db-spec)}))
 
 (defn count-leads-for [category-name]
@@ -109,5 +105,3 @@
                
 
 (def server (run-jetty #'app {:join? false, :port (:port config)}))
-
-

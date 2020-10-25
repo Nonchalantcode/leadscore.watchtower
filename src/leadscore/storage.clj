@@ -16,8 +16,6 @@
                                          inspect-buffer
                                          get-in!)]
             [leadscore.db :refer :all]
-            [leadscore.spy-fu :refer (valid-apiKey? await-batch)
-                              :rename {await-batch crawl-batch}]            
             [leadscore.netcore :refer (crawl-urls get-spyfu-info)]
             [clojure.string :refer (join split)]
             [cheshire.core :refer :all]))
@@ -194,8 +192,8 @@
                (identity nil)
                (doseq [[url {:strs [ppc_budget seo_value]}] (get-spyfu-info api-key urls)]
                  (doto (.get crawl-buffer url)
-                   (.put "ppc" (int ppc_budget))
-                   (.put "seo" (int seo_value)))))
+                   (.put "ppc" (if (nil? ppc_budget) ppc_budget (long ppc_budget)))
+                   (.put "seo" (if (nil? seo_value) seo_value (long seo_value))))))
       :phone (doseq [[url {phone :phone}] (crawl-urls urls :opt :phone)]
                (.put (.get crawl-buffer url) "phone" phone)))))
 

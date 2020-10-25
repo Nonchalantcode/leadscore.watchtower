@@ -10,15 +10,15 @@
             LinkedList])
   (:require (clojure [string :refer (replace-first starts-with?)])
             [cheshire.core :as JSON]
-            (leadscore [config :refer (config)]
-                       [spy-fu :refer (query-api)])))
+            (leadscore [config :refer (config)])))
+
+(set! *warn-on-reflection* true)
 
 (def ^:private ^:const default-phone-info {:number nil, :latency 0})
 (def ^:private ^:const default-email-info {:email nil, :latency 0})
 (def ^:private phone-matcher (:phone-matcher config))
 (def ^:private asummed-user-agent (:asummed-user-agent config))
-
-(set! *warn-on-reflection* true)
+(def ^:const ^:private spyfu-domain "spyfu.com")
 
 (defmacro try-match [str-source & regexes]
   `(or ~@(map (fn [reg] `(re-find ~reg ~str-source)) regexes)))
@@ -98,6 +98,14 @@
            (.toString source-html)))
        (catch Exception err
          (println (.getMessage err)))))
+
+(defn query-api
+  "Talks to Spy-Fu's Lead API. If :parse-json is true, returns a JSON response from the API."
+  [api-key domain & {:keys [parse-json] :or {parse-json true}}]
+  (let [spyfu-url (str "https://www.spyfu.com/apis/leads_api/get_contact_card?domain="
+                       domain "&api_key=" api-key)
+        response (read-page-source spyfu-url)]
+    (if parse-json (JSON/decode response) response)))
 
 (defn- lazy-process-urls [urls-coll f]
   (if (nil? urls-coll)
