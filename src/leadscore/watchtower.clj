@@ -73,14 +73,22 @@
    (response/header "Access-Control-Allow-Origin" "*")
    (response/header "Access-Control-Allow-Headers" "Origin, X-Requested-With, Content-Type, Accept")))
 
+(defn- list-leads []
+  (vec (.list 
+        (File. (:buffers-dir config))
+        (reify java.io.FilenameFilter
+          (accept [this file filename]
+            (not (.startsWith filename "out")))))))
+
 (defroutes routes-table
-  (GET "/" []
-    (-> (response/response "General kenobi!")
-        (with-content-type "text/plain")))
-  (GET "/api/leads" []
-       (as-json {:message "Hello, world"}))
+  (GET "/" req
+       (resource-request (assoc req :uri "/index.html") "/public"))
+  (GET "/index.html" req
+       (resource-request req "/public"))
   (GET "/api/status" []
        (as-json (assoc (test-initial-conf) :leadcount (get-total-leads-count))))
+  (GET "/leads/all" []
+       (as-json (list-leads)))
   (GET "/leads/count" []
        (as-json {:leadcount (get-total-leads-count)}))
   (GET "/leads/categories" []
