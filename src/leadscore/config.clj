@@ -47,7 +47,7 @@
               "Vermont"
               "Virginia"
               "West Virginia"}
-   :centralm #{"Arkansas"
+   :central #{"Arkansas"
               "Illinois"
               "Iowa"
               "Kansas"
@@ -85,4 +85,5 @@
              :asummed-user-agent asummed-user-agent
              :db-spec (:db-spec user-conf)
              :spy-fu (:spy-fu user-conf)
+             :timezone-mappings timezone-to-state-mappings
              :port port})

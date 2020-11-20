@@ -101,11 +101,22 @@
   (.write csv-file (join "," column-names))
   (.newLine csv-file))
 
+(defn- get-timezone [state-name]
+  (let [timezone-mappings (:timezone-mappings config)]
+    (cond
+      (= state-name ((:eastern timezone-mappings) state-name)) "Eastern"
+      (= state-name ((:central timezone-mappings) state-name)) "Central"
+      (= state-name ((:mountain timezone-mappings) state-name)) "Mountain"
+      (= state-name ((:pacific timezone-mappings) state-name)) "Pacific"
+      :else "nospec")))
+    
+
 (defn export-buffer
   "Writes to the /resources/buffers directory a .CSV file with the contents of the #'leads-buffer var"
-  [category & {:keys [timezone] :or {timezone "nospec"}}]
+  [category]
   (let [mappings ^java.util.HashMap (.remove leads-buffer category)
         all-states (map #(identity [% (.get mappings %)]) (.keySet mappings))
+        timezone (get-timezone (first (.keySet mappings)))
         results-folder (doto (java.io.File. (str buffers-dir
                                                  separator
                                                  (join "_" (split category #"\s"))
@@ -115,7 +126,7 @@
                                                  (System/currentTimeMillis)))
                          (.mkdirs))
         all-leads (doto (File. results-folder "unified.csv") (.createNewFile))]
-
+    
     ;; Write the name of the columns in the resulting .csv file
     (with-open [all-leads-handle (-> all-leads (FileWriter. true) (BufferedWriter.))]
       (write-table-head all-leads-handle "Category" "Lead URL" "State" "City" "SEO" "PPC" "Phone #"))
