@@ -144,7 +144,7 @@
   "Takes a collection of urls and tries to pull information from their HTML source. Takes an optional
   :opt param with values :phone, :email, or nil. An optional :concurrent-ops param indicates how many
   simultaneous network requests to make"
-  [urls-coll & {:keys [opt concurrent-ops] :or {concurrent-ops 3}}]
+  [urls-coll & {:keys [opt concurrent-ops] :or {concurrent-ops 5}}]
   (let [urls-info (request-webpage-source urls-coll read-page-source)]
     (condp = opt
       :phone (reduce (fn [results {{:keys [url data]} :info}]
