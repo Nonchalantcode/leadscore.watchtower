@@ -108,14 +108,13 @@
         all-states (map #(identity [% (.get mappings %)]) (.keySet mappings))
         results-folder (doto (java.io.File. (str buffers-dir
                                                  separator
-                                                 category
-                                                 "-"
+                                                 (join "_" (split category #"\s"))
+                                                 "_"
                                                  timezone
-                                                 "-"
+                                                 "_"
                                                  (System/currentTimeMillis)))
                          (.mkdirs))
-        all-leads (doto (File. results-folder "unified.csv")
-                    (.createNewFile))]
+        all-leads (doto (File. results-folder "unified.csv") (.createNewFile))]
 
     ;; Write the name of the columns in the resulting .csv file
     (with-open [all-leads-handle (-> all-leads (FileWriter. true) (BufferedWriter.))]
@@ -142,19 +141,6 @@
                                 (.write curr-state-handle (str category "," lead-url "," state-name "," city-name))
                                 (.newLine curr-state-handle))))
                   (.keySet (get-in! state-map-info "cities")))))))
-
-;; Reads a .csv into the crawl-buffer HashMap with the following shape: 
-;; {"category": category,
-;;  "url": {
-;;    city: city,
-;;    state: state,
-;;    seo: seo,
-;;    ppc: ppc,
-;;    number: number }
-;;   "urls": []}
-;; Gather all the urls from the HashMap above for which number is nil. 
-;; Crawl them using the phone-number crawling function
-;; After the crawl is finished, insert the values into the map above. 
 
 (defmulti load-crawl-buffer
   "Loads leads from a .CSV file and writes its contents to the #'crawl-buffer var for further processing,
