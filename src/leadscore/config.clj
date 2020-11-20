@@ -1,7 +1,7 @@
 (ns leadscore.config
   (:require [leadscore.functions :refer (load-config)])
   (:import (java.io File FileWriter)))
-  
+
 
 (def ^:private separator (. File separator))
 (def ^:private user-dir (. System getProperty "user.dir"))
@@ -18,13 +18,62 @@
    :spy-fu {:api-key ""}})
 
 (def ^:private user-conf (let [ENV (File. (str resources-dir separator ".ENV"))]
-                          (if (.exists ENV)
-                            (load-config ENV)
-                            (do (.createNewFile ENV)
-                                (with-open [ENV (FileWriter. ENV)]
-                                  (.write ENV (pr-str default-user-conf)))
-                                (load-config ENV)))))
-  
+                           (if (.exists ENV)
+                             (load-config ENV)
+                             (do (.createNewFile ENV)
+                                 (with-open [ENV (FileWriter. ENV)]
+                                   (.write ENV (pr-str default-user-conf)))
+                                 (load-config ENV)))))
+(def timezone-to-state-mappings
+  {:eastern #{"Alabama"
+              "Connecticut"
+              "Delaware"
+              "Florida"
+              "Georgia"
+              "Indiana"
+              "Kentucky"
+              "Maine"
+              "Maryland"
+              "Massachusetts"
+              "Michigan"
+              "New Hampshire"
+              "New Jersey"
+              "New York"
+              "North Carolina"
+              "Ohio"
+              "Pennsylvania"
+              "Rhode Island"
+              "South Carolina"
+              "Vermont"
+              "Virginia"
+              "West Virginia"}
+   :centralm #{"Arkansas"
+              "Illinois"
+              "Iowa"
+              "Kansas"
+              "Louisiana"
+              "Minnesota"
+              "Mississippi"
+              "Missouri"
+              "Nebraska"
+              "North Dakota"
+              "Oklahoma"
+              "South Dakota"
+              "Tennessee"
+              "Texas"
+              "Wisconsin"}
+   :mountain #{"Arizona"
+               "Colorado"
+               "Idaho"
+               "Montana"
+               "New Mexico"
+               "Utah"
+               "Wyoming"}
+   :pacific #{"California"
+              "Nevada"
+              "Oregon"
+              "Washington"}})
+
 (def config {:separator separator
              :user-dir user-dir
              :user-home user-home
