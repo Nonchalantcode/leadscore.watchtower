@@ -78,7 +78,7 @@
   (sort-by :timestamp
            >
            (map (fn [filename]
-                  (let [[timestamp timezone & category-name] (reverse (.split filename "_"))]
+                  (let [[timestamp timezone & category-name] (reverse (.split ^String filename "_"))]
                     {:timestamp (Long/parseLong timestamp)
                      :timezone timezone
                      :filename (join " " (reverse category-name))}))
@@ -100,16 +100,26 @@
        (as-json {:leadcount (get-total-leads-count)}))
   (GET "/leads/categories" []
        (as-json {:categories (get-active-categories)}))
-  (POST "/api/spyfu" request
-        (let [body (JSON/parse-stream (java.io.InputStreamReader. (:body request)))]
-          (println body)))
-  (POST "/api/upload" {:keys [params body]}
+  (POST "/leads/save" request
+        (do
+          (try 
+            (export-leads-buffer (first (get-active-categories)))
+            (as-json {:message "Saved", :error false})
+            (catch Exception err
+              (as-json {:message (.getMessage err), :error true})))))
+  (POST "/leads/discard" request
+        (do
+          (try (.clear leads-buffer)
+               (as-json {:message "Leads were discarded", :error false})
+               (catch Exception err
+                 (as-json {:message (.getMessage err), :error true})))))
+  (POST "/leads/upload" {:keys [params body]}
         (try
           (let [body (JSON/parse-stream (java.io.InputStreamReader. body))]
             (do (storage/save-to-buffer params body)
-                (as-json {:message "stored" :leadcount (get-total-leads-count)})))
+                (as-json {:message "stored" :leadcount (get-total-leads-count) :error false})))
           (catch Exception err
-            (do (response/response (.getMessage err)))))))
+            (as-json {:message (.getMessage err), :error true})))))
           
 
 (def app (fn [request-map]
