@@ -23,6 +23,7 @@
                              [params :refer (params-request)])
             (ring.util [response :as response])
             (ring.mock [request :as r :refer :all])
+            (clojure [string :refer (join)])
             (compojure [core :refer :all]))
   (:gen-class))
 
@@ -74,11 +75,17 @@
    (response/header "Access-Control-Allow-Headers" "Origin, X-Requested-With, Content-Type, Accept")))
 
 (defn- list-leads []
-  (vec (.list 
-        (File. (:buffers-dir config))
-        (reify java.io.FilenameFilter
-          (accept [this file filename]
-            (not (.startsWith filename "out")))))))
+  (sort-by :timestamp
+           >
+           (map (fn [filename]
+                  (let [[timestamp timezone & category-name] (reverse (.split filename "_"))]
+                    {:timestamp (Long/parseLong timestamp)
+                     :timezone timezone
+                     :filename (join " " (reverse category-name))}))
+                (.list (File. ^String (:buffers-dir config))
+                         (reify java.io.FilenameFilter
+                           (accept [this file filename]
+                             (not (.startsWith filename "out"))))))))
 
 (defroutes routes-table
   (GET "/" req
